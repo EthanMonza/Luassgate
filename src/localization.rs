@@ -79,32 +79,6 @@ impl Translator {
         }
     }
 
-    pub fn media_choice_prompt(lang: Language) -> &'static str {
-        match lang {
-            Language::En => "Select format for download:",
-            Language::Es => "Seleccione el formato de descarga:",
-            Language::Tr => "İndirme formatını seçin:",
-            Language::Ru => "Выберите формат для загрузки:",
-            Language::De => "Wählen Sie das Download-Format:",
-            Language::Fr => "Sélectionnez le format de téléchargement :",
-            Language::EnUk => "Select format for download, please:",
-            Language::EnNz => "Yeah nah, let's download this instead. Pick a format, mate:",
-        }
-    }
-
-    pub fn sarcastic_url_fallback(lang: Language) -> &'static str {
-        match lang {
-            Language::En => "We can certainly do that, but please use /video for links. Isn't that easier? 🙃",
-            Language::Es => "Podemos hacerlo, pero por favor usa /video para enlaces. ¿No es más fácil así? 🙃",
-            Language::Tr => "Bunu kesinlikle yapabiliriz ama linkler için /video kullanmak daha iyi olmaz mı? 🙃",
-            Language::Ru => "Мы конечно можем, но просим выбирать через /, так удобнее, разве нет ¿🙃?",
-            Language::De => "Wir können das natürlich machen, aber bitte benutze /video für Links. Ist das nicht einfacher? 🙃",
-            Language::Fr => "On peut le faire bien sûr, mais utilise /video pour les liens. C'est plus pratique, non ? 🙃",
-            Language::EnUk => "We can manage that, but do use /video next time. Bit more sensible, isn't it? 🙃",
-            Language::EnNz => "Yeah nah we can sort that out, but chuck it in /video next time eh? Saves us all a headache. 🙃",
-        }
-    }
-
     pub fn invalid_id(lang: Language) -> &'static str {
         match lang {
             Language::En => "Invalid ID format.",

@@ -1,6 +1,5 @@
 mod handlers;
 mod localization;
-mod media;
 mod steam;
 
 use std::sync::Arc;
@@ -25,14 +24,10 @@ async fn main() {
     // Initialize shared state
     let user_lang_state: UserLangState = Arc::new(Mutex::new(HashMap::new()));
 
-    // Define the handler tree
-    let handler = Update::filter_message()
-        .filter_command::<Command>()
-        .endpoint(command_handler)
-        .branch(
-            Update::filter_callback_query()
-                .endpoint(callback_handler)
-        );
+    let handler = dptree::entry()
+        .branch(Update::filter_message().filter_command::<Command>().endpoint(command_handler))
+        .branch(Update::filter_message().endpoint(handlers::message_handler))
+        .branch(Update::filter_callback_query().endpoint(callback_handler));
 
     // Provide the bot and state to the dispatcher
     Dispatcher::builder(bot, handler)

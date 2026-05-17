@@ -8,10 +8,9 @@ use teloxide::{
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 use std::io::Write;
-use tempfile::NamedTempFile;
+use zip::write::FileOptions;
 
 use crate::localization::{Language, Translator};
-use crate::media::{is_supported_media_link, media_format_keyboard};
 use crate::steam::{generate_appmanifest, generate_lua_script};
 
 #[derive(BotCommands, Clone)]
@@ -21,22 +20,66 @@ pub enum Command {
     Start,
     #[command(description = "Generate Steam tools by AppID")]
     Id(String),
-    #[command(description = "Download a video/audio from a link")]
-    Video(String),
 }
 
-// In-memory state to keep track of user languages.
-// In production, this should be backed by a database (SQLite, Postgres, Redis).
-pub type UserLangState = Arc<Mutex<HashMap<ChatId, Language>>>;
+#[derive(Clone, Default)]
+pub struct UserSession {
+    pub lang: Language,
+    pub waiting_for_id: bool,
+}
 
-pub async fn get_user_lang(state: &UserLangState, chat_id: ChatId) -> Language {
+pub type UserLangState = Arc<Mutex<HashMap<ChatId, UserSession>>>;
+
+pub async fn get_user_session(state: &UserLangState, chat_id: ChatId) -> UserSession {
     let map = state.lock().await;
-    map.get(&chat_id).cloned().unwrap_or(Language::En)
+    map.get(&chat_id).cloned().unwrap_or_default()
 }
 
 pub async fn set_user_lang(state: &UserLangState, chat_id: ChatId, lang: Language) {
     let mut map = state.lock().await;
-    map.insert(chat_id, lang);
+    let mut session = map.get(&chat_id).cloned().unwrap_or_default();
+    session.lang = lang;
+    map.insert(chat_id, session);
+}
+
+pub async fn set_waiting_for_id(state: &UserLangState, chat_id: ChatId, waiting: bool) {
+    let mut map = state.lock().await;
+    let mut session = map.get(&chat_id).cloned().unwrap_or_default();
+    session.waiting_for_id = waiting;
+    map.insert(chat_id, session);
+}
+
+async fn generate_and_send_steam_tools(bot: Bot, chat_id: ChatId, appid: u32, lang: Language) -> ResponseResult<()> {
+    // Attempt to fetch real game name, fallback to a default
+    let mut game_name = format!("SteamTools App {}", appid);
+    if let Some(fetched_name) = crate::steam::fetch_game_name(appid).await {
+        if !fetched_name.is_empty() {
+            game_name = fetched_name;
+        }
+    }
+
+    let acf_content = generate_appmanifest(appid, &game_name);
+    let lua_content = generate_lua_script(appid);
+    
+    let zip_filename = format!("{}; {}.zip", appid, game_name);
+    let final_zip = std::env::temp_dir().join(&zip_filename);
+    
+    let file = std::fs::File::create(&final_zip).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    let options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    
+    zip.start_file(format!("appmanifest_{}.acf", appid), options).unwrap();
+    zip.write_all(acf_content.as_bytes()).unwrap();
+    
+    zip.start_file(format!("{}.lua", appid), options).unwrap();
+    zip.write_all(lua_content.as_bytes()).unwrap();
+    
+    zip.finish().unwrap();
+
+    let input_file = InputFile::file(&final_zip).file_name(zip_filename);
+    bot.send_document(chat_id, input_file).await?;
+    let _ = std::fs::remove_file(final_zip);
+    Ok(())
 }
 
 pub async fn command_handler(
@@ -46,10 +89,12 @@ pub async fn command_handler(
     state: UserLangState,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id;
-    let lang = get_user_lang(&state, chat_id).await;
+    let session = get_user_session(&state, chat_id).await;
+    let lang = session.lang;
 
     match cmd {
         Command::Start => {
+            set_waiting_for_id(&state, chat_id, false).await;
             let keyboard = InlineKeyboardMarkup::default()
                 .append_row(vec![
                     InlineKeyboardButton::callback("🇬🇧 English", "set_lang:en"),
@@ -70,76 +115,47 @@ pub async fn command_handler(
                 .await?;
         }
         Command::Id(arg) => {
-            // Check if arg is empty
             if arg.is_empty() {
-                bot.send_message(chat_id, "Please provide an AppID. Example: /id 1245620").await?;
+                set_waiting_for_id(&state, chat_id, true).await;
+                bot.send_message(chat_id, "Please enter the Steam AppID (e.g., 1962700):").await?;
                 return Ok(());
             }
 
-            // Check if it's actually a media link fallback
-            if is_supported_media_link(&arg) {
-                let text = format!(
-                    "{}\n\n{}",
-                    Translator::sarcastic_url_fallback(lang),
-                    Translator::media_choice_prompt(lang)
-                );
-                
-                let keyboard = media_format_keyboard(&arg);
-                bot.send_message(chat_id, text)
-                    .reply_markup(keyboard)
-                    .await?;
-                return Ok(());
-            }
-
-            // Try parse to u32
             match arg.parse::<u32>() {
                 Ok(appid) => {
-                    let acf_content = generate_appmanifest(appid);
-                    let lua_content = generate_lua_script(appid);
-                    
-                    // Create temporary files to send as documents
-                    let mut acf_file = NamedTempFile::new().unwrap();
-                    write!(acf_file, "{}", acf_content).unwrap();
-                    let acf_path = acf_file.into_temp_path();
-                    
-                    let mut lua_file = NamedTempFile::new().unwrap();
-                    write!(lua_file, "{}", lua_content).unwrap();
-                    let lua_path = lua_file.into_temp_path();
-                    
-                    // Rename paths conceptually (InputFile requires a standard path or stream)
-                    // For simplicity we will rename them in the filesystem temp dir temporarily
-                    let final_acf = std::env::temp_dir().join(format!("appmanifest_{}.acf", appid));
-                    let final_lua = std::env::temp_dir().join(format!("{}.lua", appid));
-                    
-                    std::fs::rename(acf_path, &final_acf).unwrap();
-                    std::fs::rename(lua_path, &final_lua).unwrap();
-
-                    bot.send_document(chat_id, InputFile::file(&final_acf)).await?;
-                    bot.send_document(chat_id, InputFile::file(&final_lua)).await?;
-
-                    // Cleanup
-                    let _ = std::fs::remove_file(final_acf);
-                    let _ = std::fs::remove_file(final_lua);
+                    generate_and_send_steam_tools(bot, chat_id, appid, lang).await?;
                 }
                 Err(_) => {
                     bot.send_message(chat_id, Translator::invalid_id(lang)).await?;
                 }
             }
         }
-        Command::Video(arg) => {
-            if arg.is_empty() || !is_supported_media_link(&arg) {
-                bot.send_message(chat_id, "Please provide a valid media URL. Example: /video https://youtube.com/...").await?;
-                return Ok(());
-            }
-
-            let text = Translator::media_choice_prompt(lang);
-            let keyboard = media_format_keyboard(&arg);
-            bot.send_message(chat_id, text)
-                .reply_markup(keyboard)
-                .await?;
-        }
     };
 
+    Ok(())
+}
+
+pub async fn message_handler(
+    bot: Bot,
+    msg: Message,
+    state: UserLangState,
+) -> ResponseResult<()> {
+    let chat_id = msg.chat.id;
+    let session = get_user_session(&state, chat_id).await;
+
+    if session.waiting_for_id {
+        if let Some(text) = msg.text() {
+            match text.trim().parse::<u32>() {
+                Ok(appid) => {
+                    set_waiting_for_id(&state, chat_id, false).await;
+                    generate_and_send_steam_tools(bot, chat_id, appid, session.lang).await?;
+                }
+                Err(_) => {
+                    bot.send_message(chat_id, Translator::invalid_id(session.lang)).await?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -162,35 +178,6 @@ pub async fn callback_handler(
                     bot.edit_message_text(chat_id, msg.id, text).await?;
                 }
                 bot.answer_callback_query(q.id).await?;
-            }
-        } else if data.starts_with("dl_mp3:") || data.starts_with("dl_mp4:") {
-            let is_audio = data.starts_with("dl_mp3:");
-            let prefix = if is_audio { "dl_mp3:" } else { "dl_mp4:" };
-            let url = data.trim_start_matches(prefix);
-            
-            // Acknowledge the query immediately so telegram UI stops loading
-            bot.answer_callback_query(q.id.clone()).text("Download started...").await?;
-            
-            if let Some(msg) = q.message {
-                bot.edit_message_text(chat_id, msg.id, "Processing your download... Please wait.").await?;
-                
-                // Note: The actual download_media function in media.rs is mocked.
-                // You can spawn a task here or call it directly.
-                // let result = crate::media::download_media(url, is_audio).await;
-                // Since this might take a while, normally spawn it:
-                let bot_clone = bot.clone();
-                let url_owned = url.to_string();
-                
-                tokio::spawn(async move {
-                    // let file_path = crate::media::download_media(&url_owned, is_audio).await;
-                    // Mock delay
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    
-                    let _ = bot_clone.send_message(
-                        chat_id, 
-                        format!("✅ Download complete for: {}\n(Simulated)", url_owned)
-                    ).await;
-                });
             }
         }
     }

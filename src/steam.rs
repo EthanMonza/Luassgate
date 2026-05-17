@@ -1,13 +1,37 @@
+/// Fetches the real game name from the Steam API
+pub async fn fetch_game_name(appid: u32) -> Option<String> {
+    let url = format!("https://store.steampowered.com/api/appdetails?appids={}", appid);
+    if let Ok(resp) = reqwest::get(&url).await {
+        if let Ok(json) = resp.json::<serde_json::Value>().await {
+            if let Some(app_data) = json.get(&appid.to_string()) {
+                if app_data.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if let Some(data) = app_data.get("data") {
+                        if let Some(name) = data.get("name").and_then(|n| n.as_str()) {
+                            // Sanitize filename characters
+                            let safe_name = name.replace(|c: char| {
+                                c == '<' || c == '>' || c == ':' || c == '"' || 
+                                c == '/' || c == '\\' || c == '|' || c == '?' || c == '*'
+                            }, "");
+                            return Some(safe_name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Generates the VDF formatted `appmanifest_[id].acf` content.
-pub fn generate_appmanifest(appid: u32) -> String {
+pub fn generate_appmanifest(appid: u32, game_name: &str) -> String {
     format!(
 r#""AppState"
 {{
     "appid"     "{}"
     "Universe"  "1"
-    "name"      "SteamTools App {}"
+    "name"      "{}"
     "StateFlags" "1026"
-    "installdir" "SteamToolsApp_{}"
+    "installdir" "{}"
     "LastUpdated" "1672531200"
     "UpdateResult" "0"
     "SizeOnDisk" "0"
@@ -22,7 +46,7 @@ r#""AppState"
     "ScheduledAutoUpdate" "0"
 }}
 "#,
-        appid, appid, appid
+        appid, game_name, game_name
     )
 }
 
