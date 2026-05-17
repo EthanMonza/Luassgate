@@ -7,7 +7,6 @@ pub async fn fetch_game_name(appid: u32) -> Option<String> {
                 if app_data.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
                     if let Some(data) = app_data.get("data") {
                         if let Some(name) = data.get("name").and_then(|n| n.as_str()) {
-                            // Sanitize filename characters
                             let safe_name = name.replace(|c: char| {
                                 c == '<' || c == '>' || c == ':' || c == '"' || 
                                 c == '/' || c == '\\' || c == '|' || c == '?' || c == '*'
@@ -22,58 +21,45 @@ pub async fn fetch_game_name(appid: u32) -> Option<String> {
     None
 }
 
-/// Generates the VDF formatted `appmanifest_[id].acf` content.
-pub fn generate_appmanifest(appid: u32, game_name: &str) -> String {
-    format!(
-r#""AppState"
-{{
-    "appid"     "{}"
-    "Universe"  "1"
-    "name"      "{}"
-    "StateFlags" "1026"
-    "installdir" "{}"
-    "LastUpdated" "1672531200"
-    "UpdateResult" "0"
-    "SizeOnDisk" "0"
-    "buildid" "1234567"
-    "LastOwner" "0"
-    "BytesToDownload" "0"
-    "BytesDownloaded" "0"
-    "BytesToStage" "0"
-    "BytesStaged" "0"
-    "AutoUpdateBehavior" "0"
-    "AllowOtherDownloadsWhileRunning" "0"
-    "ScheduledAutoUpdate" "0"
-}}
-"#,
-        appid, game_name, game_name
-    )
-}
-
-/// Generates the `.lua` persistence script content.
-pub fn generate_lua_script(appid: u32) -> String {
-    format!(
-r#"-- SteamTools lua generator script
--- AppID: {}
-
-local app_id = {}
-local depot_id = app_id + 1
-
-local function override_app_state()
-    print(string.format("Intercepting Steam API for AppID %d", app_id))
-    -- Mock payload for game manifest overrides
-    local payload = {{
-        app_id = app_id,
-        depots = {{
-            [depot_id] = {{ manifest = "1234567890123456789" }}
-        }}
-    }}
-    return payload
-end
-
-override_app_state()
-print("Success: Generated SteamTools bypass configuration.")
-"#,
-        appid, appid
-    )
+pub async fn download_real_manifest_zip(appid: u32) -> Result<String, String> {
+    // Many sites (like generator.ryuu.lol) require an active session cookie to prevent bot abuse.
+    // Set MANIFEST_COOKIE to your browser session cookie.
+    let api_cookie = std::env::var("MANIFEST_COOKIE").unwrap_or_default();
+    
+    // The base URL can be customized since these manifest sites frequently change domains.
+    let custom_url = std::env::var("MANIFEST_API_URL").unwrap_or_default();
+    
+    let target_url = if custom_url.is_empty() {
+        format!("https://pub-5b6d3b7c03fd4ac1afb5bd3017850e20.r2.dev/{}.zip", appid)
+    } else {
+        if custom_url.contains("{app_id}") {
+            custom_url.replace("{app_id}", &appid.to_string())
+        } else {
+            format!("{}{}", custom_url, appid)
+        }
+    };
+    
+    let client = reqwest::Client::new();
+    let mut req = client.get(&target_url);
+    
+    if !api_cookie.is_empty() {
+        req = req.header("Cookie", api_cookie);
+    }
+    
+    let resp = req.send().await.map_err(|e| format!("Failed to connect to API: {}", e))?;
+    
+    if !resp.status().is_success() {
+        return Err(format!("API returned error: {}", resp.status()));
+    }
+    
+    let temp_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+    let file_path = std::env::temp_dir().join(format!("steamtools_{}.zip", temp_id));
+    
+    let mut file = std::fs::File::create(&file_path).map_err(|e| e.to_string())?;
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    
+    use std::io::Write;
+    file.write_all(&bytes).map_err(|e| e.to_string())?;
+    
+    Ok(file_path.to_string_lossy().to_string())
 }

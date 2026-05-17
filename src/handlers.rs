@@ -8,10 +8,8 @@ use teloxide::{
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 use std::io::Write;
-use zip::write::FileOptions;
 
 use crate::localization::{Language, Translator};
-use crate::steam::{generate_appmanifest, generate_lua_script};
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "These commands are supported:")]
@@ -58,27 +56,20 @@ async fn generate_and_send_steam_tools(bot: Bot, chat_id: ChatId, appid: u32, la
         }
     }
 
-    let acf_content = generate_appmanifest(appid, &game_name);
-    let lua_content = generate_lua_script(appid);
-    
-    let zip_filename = format!("{}; {}.zip", appid, game_name);
-    let final_zip = std::env::temp_dir().join(&zip_filename);
-    
-    let file = std::fs::File::create(&final_zip).unwrap();
-    let mut zip = zip::ZipWriter::new(file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    
-    zip.start_file(format!("appmanifest_{}.acf", appid), options).unwrap();
-    zip.write_all(acf_content.as_bytes()).unwrap();
-    
-    zip.start_file(format!("{}.lua", appid), options).unwrap();
-    zip.write_all(lua_content.as_bytes()).unwrap();
-    
-    zip.finish().unwrap();
+    bot.send_message(chat_id, "Downloading real manifest from generator API (this may take a moment)...").await?;
 
-    let input_file = InputFile::file(&final_zip).file_name(zip_filename);
-    bot.send_document(chat_id, input_file).await?;
-    let _ = std::fs::remove_file(final_zip);
+    match crate::steam::download_real_manifest_zip(appid).await {
+        Ok(file_path) => {
+            let zip_filename = format!("{}; {}.zip", appid, game_name);
+            let input_file = InputFile::file(&file_path).file_name(zip_filename);
+            bot.send_document(chat_id, input_file).await?;
+            let _ = std::fs::remove_file(file_path);
+        }
+        Err(e) => {
+            bot.send_message(chat_id, format!("❌ Failed to download manifest: {}", e)).await?;
+        }
+    }
+    
     Ok(())
 }
 
