@@ -12,10 +12,18 @@ use handlers::{command_handler, callback_handler, Command, UserLangState};
 
 #[tokio::main]
 async fn main() {
+    // Дефолтный уровень логов для Railway/докера, если RUST_LOG не задан.
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     pretty_env_logger::init();
     log::info!("Starting Telegram Bot...");
 
-    // You need to set TELOXIDE_TOKEN in your environment variables.
+    // Понятная ошибка вместо паники teloxide, если забыли задать токен.
+    if std::env::var("TELOXIDE_TOKEN").is_err() {
+        log::error!("TELOXIDE_TOKEN is not set. Add it in Railway Variables (or .env locally).");
+        std::process::exit(1);
+    }
     let bot = Bot::from_env();
 
     // Register commands to the bot menu natively

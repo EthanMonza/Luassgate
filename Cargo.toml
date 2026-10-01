@@ -2,6 +2,12 @@
 name = "telegram_bot_rust"
 version = "0.1.0"
 edition = "2021"
+description = "Telegram bot: Steam manifests by AppID (teloxide)"
+rust-version = "1.75"
+
+[profile.release]
+strip = true
+opt-level = 3
 
 [dependencies]
 teloxide = { version = "0.12", features = ["macros", "ctrlc_handler"] }

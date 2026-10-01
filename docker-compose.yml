@@ -1,0 +1,7 @@
+services:
+  bot:
+    build: .
+    env_file: .env
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+    restart: unless-stopped
