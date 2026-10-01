@@ -1,75 +1,75 @@
-# Luassgate — Telegram-бот (Rust + teloxide)
+# Luassgate — Telegram bot (Rust + teloxide)
 
-Telegram-бот, который выдаёт Steam-манифесты по AppID. Мультиязычный: язык выбирается кнопками после `/start`.
+A Telegram bot that serves Steam manifests by AppID. Multilingual: the language is picked via buttons after `/start`.
 
-## Команды
+## Commands
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `/start` | Приветствие + выбор языка (кнопки) |
-| `/id <AppID>` | Скачать manifest-zip для игры, например `/id 1962700` |
-| (просто число) | Если вызвать `/id` без аргумента, бот попросит ввести AppID следующим сообщением |
+| `/start` | Greeting + language picker (inline buttons) |
+| `/id <AppID>` | Download the manifest zip for a game, e.g. `/id 1962700` |
+| (just a number) | If `/id` is sent without an argument, the bot asks for the AppID in the next message |
 
-Бот подтягивает реальное название игры из Steam Store API и присылает файл вида `1962700; Название.zip`.
+The bot resolves the real game name via the Steam Store API and sends a file like `1962700; Game Name.zip`.
 
-## Переменные окружения
+## Environment variables
 
-| Переменная | Обязательна | Описание |
+| Variable | Required | Description |
 |---|---|---|
-| `TELOXIDE_TOKEN` | да | Токен бота от [@BotFather](https://t.me/BotFather) |
-| `RUST_LOG` | нет | Уровень логов, по умолчанию `info` |
-| `MANIFEST_COOKIE` | нет | Cookie сессии для manifest-API (если API режет запросы без сессии браузера) |
-| `MANIFEST_API_URL` | нет | Кастомный URL manifest-API. Можно с плейсхолдером `{app_id}`, иначе AppID дописывается в конец. По умолчанию используется встроенный R2-URL |
+| `TELOXIDE_TOKEN` | yes | Bot token from [@BotFather](https://t.me/BotFather) |
+| `RUST_LOG` | no | Log level, defaults to `info` |
+| `MANIFEST_COOKIE` | no | Session cookie for the manifest API (if the API blocks requests without a browser session) |
+| `MANIFEST_API_URL` | no | Custom manifest API URL. Supports the `{app_id}` placeholder, otherwise the AppID is appended at the end. Falls back to the built-in R2 URL |
 
-## Локальный запуск
+## Run locally
 
 ```bash
-cp .env.example .env   # вписать TELOXIDE_TOKEN
+cp .env.example .env   # put your TELOXIDE_TOKEN in there
 cargo run --release
 ```
 
-## Docker локально
+## Docker locally
 
 ```bash
 docker build -t luassgate .
 docker run --rm --env-file .env luassgate
-# или
+# or
 docker compose up --build
 ```
 
-## Деплой на Railway
+## Deploy to Railway
 
-1. Запушьте код на GitHub так, чтобы в корне репозитория лежали `Cargo.toml`, `Dockerfile`, `railway.toml` и папка `src/` (как сейчас).
-2. В Railway: **New Project → Deploy from GitHub** → выберите репозиторий.
-3. Railway сам найдёт `Dockerfile` (см. `railway.toml`, builder `DOCKERFILE`).
-4. Во вкладке **Variables** добавьте:
-   - `TELOXIDE_TOKEN` — токен от @BotFather;
-   - при необходимости `MANIFEST_COOKIE` / `MANIFEST_API_URL`.
-5. Нажмите **Deploy**. Логи должны показать `Starting Telegram Bot...`.
-6. Это polling-бот (входящие HTTP-запросы не принимает), поэтому:
-   - **не добавляйте домен** (Generate Domain не нужен);
-   - **не включайте healthcheck по HTTP** — сервис работает как worker.
+1. Push the code to GitHub so that `Cargo.toml`, `Dockerfile`, `railway.toml`, and the `src/` folder sit at the repository root (as they do now).
+2. In Railway: **New Project → Deploy from GitHub** → pick the repository.
+3. Railway picks up the `Dockerfile` automatically (see `railway.toml`, builder `DOCKERFILE`).
+4. Under **Variables**, add:
+   - `TELOXIDE_TOKEN` — token from @BotFather;
+   - optionally `MANIFEST_COOKIE` / `MANIFEST_API_URL`.
+5. Hit **Deploy**. The logs should show `Starting Telegram Bot...`.
+6. This is a polling bot (it accepts no inbound HTTP traffic), so:
+   - **don't add a domain** (Generate Domain is not needed);
+   - **don't enable an HTTP healthcheck** — the service runs as a worker.
 
-Пересборка происходит автоматически при каждом пуше в подключённую ветку.
+Railway rebuilds automatically on every push to the connected branch.
 
-## Структура
+## Layout
 
 ```
 .
-├── Dockerfile          # multi-stage сборка (rust → debian-slim, non-root user)
-├── railway.toml        # builder DOCKERFILE + restart policy
-├── docker-compose.yml  # локальный запуск через Docker
-├── .env.example        # шаблон переменных окружения
+├── Dockerfile          # multi-stage build (rust → debian-slim, non-root user)
+├── railway.toml        # DOCKERFILE builder + restart policy
+├── docker-compose.yml  # local Docker run
+├── .env.example        # environment variable template
 └── src/
-    ├── main.rs         # точка входа, dispatcher teloxide
-    ├── handlers.rs     # команды /start, /id, колбэки языка
-    ├── localization.rs # 8 языков (en/es/tr/ru/de/fr/en_UK/en_NZ)
-    ├── steam.rs        # Steam Store API + скачивание manifest-zip
-    └── media.rs        # (пока не подключён) заготовки под yt-dlp
+    ├── main.rs         # entry point, teloxide dispatcher
+    ├── handlers.rs     # /start and /id commands, language callbacks
+    ├── localization.rs # 8 locales (en/es/tr/ru/de/fr/en_UK/en_NZ)
+    ├── steam.rs        # Steam Store API + manifest-zip download
+    └── media.rs        # (not wired up yet) yt-dlp scaffolding
 ```
 
-## Заметки
+## Notes
 
-- `RUST_LOG` по умолчанию выставляется в `info`, если переменная не задана.
-- Если `TELOXIDE_TOKEN` не задан, бот сразу завершается с понятной ошибкой в логах (а не паникой teloxide).
-- `src/media.rs` сейчас нигде не используется (модуль не подключён в `main.rs`) — оставлен как заготовка.
+- `RUST_LOG` falls back to `info` when the variable is not set.
+- If `TELOXIDE_TOKEN` is missing, the bot exits right away with a clear log message instead of a teloxide panic.
+- `src/media.rs` is currently unused (the module is not wired into `main.rs`) — kept as scaffolding.

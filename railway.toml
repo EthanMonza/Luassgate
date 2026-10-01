@@ -1,4 +1,4 @@
-# Railway: сборка строго через Dockerfile в корне сервиса
+# Railway: build strictly via the Dockerfile at the service root
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"

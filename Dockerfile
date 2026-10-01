@@ -4,7 +4,7 @@
 FROM rust:1.82-slim-bookworm AS builder
 WORKDIR /app
 
-# teloxide / reqwest (openssl) нужны C-зависимости для сборки
+# teloxide / reqwest (openssl) need C build dependencies
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*

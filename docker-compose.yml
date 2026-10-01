@@ -1,3 +1,4 @@
+# Local Docker run (mirrors the Railway runtime: single worker, no ports)
 services:
   bot:
     build: .
