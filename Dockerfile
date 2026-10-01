@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 
 # ---------- build ----------
-FROM rust:1.82-slim-bookworm AS builder
+# Pinned to the latest stable 1.x line (floating major tag):
+# old pinned versions (e.g. 1.82) break when transitive deps start requiring edition2024 (Cargo 1.85+).
+FROM rust:1-slim-bookworm AS builder
 WORKDIR /app
 
 # teloxide / reqwest (openssl) need C build dependencies
